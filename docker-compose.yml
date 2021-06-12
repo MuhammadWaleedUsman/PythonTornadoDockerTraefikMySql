@@ -1,0 +1,88 @@
+version: "3"
+
+volumes:
+  mysql_data:
+
+services:
+  traefik-manager:
+    image: traefik:1.5-alpine
+    restart: always
+    command: [
+        "traefik",
+        "--api",
+        "--docker",
+        "--web",
+        '--logLevel=info',
+        '--docker.domain=localhost',
+        '--docker.endpoint=unix:///var/run/docker.sock',
+        '--docker.watch=true',
+        '--docker.exposedbydefault=false'
+    ]
+    container_name: traefik
+    labels:
+      - traefik.frontend.entryPoints=http
+      - traefik.frontend.rule=PathPrefixStrip:/traefik;Host:localhost
+      - traefik.port=8080
+      - traefik.enable=true
+    networks:
+      - internal
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  redis:
+    image: redis:alpine
+    networks:
+      - internal
+
+  tornado: &tornado
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: app
+    depends_on:
+      - mysql
+      - redis
+    environment:
+      DEBUG: 1
+    labels:
+      - traefik.backend=tornado
+      - traefik.frontend.entryPoints=http
+      - traefik.frontend.rule=PathPrefixStrip:/server;Host:localhost
+      - traefik.docker.network=proxy
+      - traefik.frontend.headers.customresponseheaders.Access-Control-Allow-Origin = '*'
+      - traefik.port=5000
+      - traefik.enable=true
+    ports:
+      - "5000:5000"
+    networks:
+      - internal
+
+  mysql:
+    image: mysql:latest
+    container_name: mysql
+    hostname: mysql
+    domainname: localhost
+    environment:
+      MYSQL_ROOT_PASSWORD: 1234
+      MYSQL_USER: user
+      MYSQL_PASSWORD: pass
+      MYSQL_DATABASE: multiuser_db
+    restart: always
+    healthcheck:
+      test: "exit 0"
+    command: --default-authentication-plugin=mysql_native_password
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - internal
+
+networks:
+  web:
+  internal:
+    internal: true
